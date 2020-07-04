@@ -1,0 +1,360 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+#--------------------------------------
+# using docker-swarm example
+# by "Jaegyeong LEE"
+#--------------------------------------
+
+# to deploy hyperledger network to docker-swarm netork
+# 1. setting host VM network (ex. ip address, ping test, /etc/hosts file setting etc... )
+# 2. after network setting successfuly, 'docker swarm init' operate in the manager VM
+# 3. operate 'docker swarm join ~~~~~' to join worker VM to the manager VM
+# 4. check docker swarm network (operation is 'docker node ls')
+# 5. create docker network to use docker-swarm (operation is docker network create ~~~~~ )
+# 6. if all thing is good, start docker stack deploy (opertion is docker stack deploy --compse-file [compose file name] [custom stack name])
+# 7. finally, checking docker-swarm network 
+#     - docker stack ps [custome stack name]
+#     - docker ps -a
+#     - docker service ls
+#     - etc ......
+# % if docker can't start container, restart docker
+# 8. when you down the docker, you must clean all VM's docker (ex. volume, container etc) 
+
+version: '3.4'
+
+volumes:
+  orderer.acornpub.com:
+  peer0.sales1.acornpub.com:
+  peer1.sales1.acornpub.com:
+  peer0.customer.acornpub.com:
+  peer1.customer.acornpub.com:
+
+#setting docker network
+networks:
+  acornpub:
+    external: true
+
+services:
+# docker-swarm's service name can't be using "."(comma) 
+  orderer_acornpub_com:
+    container_name: orderer.acornpub.com
+    image: hyperledger/fabric-orderer:1.4.3
+    environment:
+      # Loggin spec can use 1.DEBUG 2.INFO
+      - FABRIC_LOGGING_SPEC=DEBUG
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_GENESISMETHOD=file
+      - ORDERER_GENERAL_GENESISFILE=/var/hyperledger/orderer/orderer.genesis.block
+      # Must matched config.tx's OrdererID 
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      # enabled TLS
+      # be careful when using TLS. you must using https
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_KAFKA_TOPIC_REPLICATIONFACTOR=1
+      - ORDERER_KAFKA_VERBOSE=true
+      - ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_CLUSTER_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric
+    command: orderer
+    volumes:
+      # be careful to setting path both docker extenal and docker inner
+        - /home/ljk/poringNetwork/channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+        - /home/ljk/poringNetwork/crypto-config/ordererOrganizations/acornpub.com/orderers/orderer.acornpub.com/msp:/var/hyperledger/orderer/msp
+        - /home/ljk/poringNetwork/crypto-config/ordererOrganizations/acornpub.com/orderers/orderer.acornpub.com/tls/:/var/hyperledger/orderer/tls
+        - orderer.acornpub.com:/var/hyperledger/production/orderer
+    # docker-swarm stack deploy setting
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          # Using linux(18,16 LTS)'s setting file "/etc/hosts"
+          # you must do setting /etc/hosts
+          # /etc/hosts/ must set the docker-swarm's manager name and IP and the docker-swarm's worker name and IP
+          # /etc/hosts's name setting is liked VM's hostsname
+          - node.hostname == ljk-VirtualBox
+    # port's number seeting in the docker-swarm
+    ports:
+      - published: 7050
+        target: 7050
+        mode: host
+    # determain the docker-swarm network
+    # to make docker-swarm network, you using 'docker network create' operation
+    # see the 'docker network create -h'
+    networks:
+      acornpub:
+        # setting the special name in docker-swarm network
+        aliases:
+          - orderer.acornpub.com
+
+  peer0_sales1_acornpub_com:
+    container_name: peer0.sales1.acornpub.com
+    image: hyperledger/fabric-peer:1.4.3
+    environment:
+      - CORE_PEER_ID=peer0.sales1.acornpub.com
+      - CORE_PEER_ADDRESS=peer0.sales1.acornpub.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.sales1.acornpub.com:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer1.sales1.acornpub.com:8051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.sales1.acornpub.com:7051
+      - CORE_PEER_LOCALMSPID=Sales1MSP
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      # the following setting starts chaincode containers on the same
+      # bridge network as the peers
+      # https://docs.docker.com/compose/networking/
+      # setting to using docker-swarm network
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=acornpub
+      - FABRIC_LOGGING_SPEC=INFO
+      #- FABRIC_LOGGING_SPEC=DEBUG
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_GOSSIP_USELEADERELECTION=true
+      - CORE_PEER_GOSSIP_ORGLEADER=false
+      - CORE_PEER_PROFILE_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+        - /var/run/:/host/var/run/
+        - /home/fabric/poringNetwork/crypto-config/peerOrganizations/sales1.acornpub.com/peers/peer0.sales1.acornpub.com/msp:/etc/hyperledger/fabric/msp
+        - /home/fabric/poringNetwork/crypto-config/peerOrganizations/sales1.acornpub.com/peers/peer0.sales1.acornpub.com/tls:/etc/hyperledger/fabric/tls
+        - /home/fabric/poringNetwork/channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+        - /home/fabric/poringNetwork/crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto
+        - peer0.sales1.acornpub.com:/var/hyperledger/production
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == fabric-VirtualBox
+    ports:
+      - published: 7051
+        target: 7051
+        mode: host
+      - published: 7052
+        target: 7052
+        mode: host
+    networks:
+      acornpub:
+        aliases:
+          - peer0.sales1.acornpub.com
+      
+  peer1_sales1_acornpub_com:
+    container_name: peer1.sales1.acornpub.com
+    image: hyperledger/fabric-peer:1.4.3
+    environment:
+      - CORE_PEER_ID=peer1.sales1.acornpub.com
+      - CORE_PEER_ADDRESS=peer1.sales1.acornpub.com:8051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:8051
+      - CORE_PEER_CHAINCODEADDRESS=peer1.sales1.acornpub.com:8052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:8052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.sales1.acornpub.com:8051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.sales1.acornpub.com:7051
+      - CORE_PEER_LOCALMSPID=Sales1MSP
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      # the following setting starts chaincode containers on the same
+      # bridge network as the peers
+      # https://docs.docker.com/compose/networking/
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=acornpub
+      - FABRIC_LOGGING_SPEC=INFO
+      #- FABRIC_LOGGING_SPEC=DEBUG
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_GOSSIP_USELEADERELECTION=true
+      - CORE_PEER_GOSSIP_ORGLEADER=false
+      - CORE_PEER_PROFILE_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./crypto-config/peerOrganizations/sales1.acornpub.com/peers/peer1.sales1.acornpub.com/msp:/etc/hyperledger/fabric/msp
+        - ./crypto-config/peerOrganizations/sales1.acornpub.com/peers/peer1.sales1.acornpub.com/tls:/etc/hyperledger/fabric/tls
+        - ./crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/
+        - peer1.sales1.acornpub.com:/var/hyperledger/production
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == fabric-VirtualBox
+    ports:
+      - published: 8051
+        target: 8051
+        mode: host
+      - published: 8052
+        target: 8052
+        mode: host        
+    networks:
+      acornpub:
+        aliases:
+          - peer1.sales1.acornpub.com
+
+  peer0_customer_acornpub_com:
+    container_name: peer0.customer.acornpub.com
+    image: hyperledger/fabric-peer:1.4.3
+    environment:
+      - CORE_PEER_ID=peer0.customer.acornpub.com
+      - CORE_PEER_ADDRESS=peer0.customer.acornpub.com:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.customer.acornpub.com:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.customer.acornpub.com:9051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer1.customer.acornpub.com:10051
+      - CORE_PEER_LOCALMSPID=CustomerMSP
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      # the following setting starts chaincode containers on the same
+      # bridge network as the peers
+      # https://docs.docker.com/compose/networking/
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=acornpub
+      - FABRIC_LOGGING_SPEC=INFO
+      #- FABRIC_LOGGING_SPEC=DEBUG
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_GOSSIP_USELEADERELECTION=true
+      - CORE_PEER_GOSSIP_ORGLEADER=false
+      - CORE_PEER_PROFILE_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./crypto-config/peerOrganizations/customer.acornpub.com/peers/peer0.customer.acornpub.com/msp:/etc/hyperledger/fabric/msp
+        - ./crypto-config/peerOrganizations/customer.acornpub.com/peers/peer0.customer.acornpub.com/tls:/etc/hyperledger/fabric/tls
+        - peer0.customer.acornpub.com:/var/hyperledger/production
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == fabric-VirtualBox
+    ports:
+      - published: 9051
+        target: 9051
+        mode: host
+      - published: 9052
+        target: 9052
+        mode: host        
+    networks:
+      acornpub:
+        aliases:
+          - peer0.customer.acornpub.com
+
+  peer1_customer_acornpub_com:
+    container_name: peer1.customer.acornpub.com
+    image: hyperledger/fabric-peer:1.4.3
+    environment:
+      - CORE_PEER_ID=peer1.customer.acornpub.com
+      - CORE_PEER_ADDRESS=peer1.customer.acornpub.com:10051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:10051
+      - CORE_PEER_CHAINCODEADDRESS=peer1.customer.acornpub.com:10052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:10052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1.customer.acornpub.com:10051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.customer.acornpub.com:9051
+      - CORE_PEER_LOCALMSPID=CustomerMSP
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      # the following setting starts chaincode containers on the same
+      # bridge network as the peers
+      # https://docs.docker.com/compose/networking/
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=acornpub
+      - FABRIC_LOGGING_SPEC=INFO
+      #- FABRIC_LOGGING_SPEC=DEBUG
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_GOSSIP_USELEADERELECTION=true
+      - CORE_PEER_GOSSIP_ORGLEADER=false
+      - CORE_PEER_PROFILE_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+        - /var/run/:/host/var/run/
+        - /home/ljk/poringNetwork/crypto-config/peerOrganizations/customer.acornpub.com/peers/peer1.customer.acornpub.com/msp:/etc/hyperledger/fabric/msp
+        - /home/ljk/poringNetwork/crypto-config/peerOrganizations/customer.acornpub.com/peers/peer1.customer.acornpub.com/tls:/etc/hyperledger/fabric/tls
+        - peer1.customer.acornpub.com:/var/hyperledger/production
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == ljk-VirtualBox
+    ports:
+      - published: 10051
+        target: 10051
+        mode: host
+      - published: 10052
+        target: 10052
+        mode: host        
+    networks:
+      acornpub:
+        aliases:
+          - peer1.customer.acornpub.com
+
+  cli:
+    container_name: cli
+    image: hyperledger/fabric-tools:1.4.3
+    tty: true
+    stdin_open: true
+    environment:
+      - SYS_CHANNEL=$SYS_CHANNEL
+      - GOPATH=/opt/gopath
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      #- FABRIC_LOGGING_SPEC=DEBUG
+      - FABRIC_LOGGING_SPEC=DEBUG
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.sales1.acornpub.com:7051
+      - CORE_PEER_LOCALMSPID=Sales1MSP
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/sales1.acornpub.com/peers/peer0.sales1.acornpub.com/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/sales1.acornpub.com/peers/peer0.sales1.acornpub.com/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/sales1.acornpub.com/peers/peer0.sales1.acornpub.com/tls/ca.crt
+      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/sales1.acornpub.com/users/Admin@sales1.acornpub.com/msp
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./chaincode/:/opt/gopath/src/github.com/chaincode
+        - ./crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/
+        - ./scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts/
+        - ./channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+    depends_on:
+      - orderer_acornpub_com
+      - peer0_sales1_acornpub_com
+      - peer1_sales1_acornpub_com
+      - peer0_customer_acornpub_com
+      - peer1_customer_acornpub_com
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == fabric-VirtualBox
+    networks:
+      acornpub:
+        aliases:
+          - cli

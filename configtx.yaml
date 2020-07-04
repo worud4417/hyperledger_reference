@@ -1,0 +1,209 @@
+Organizations:
+    - &OrdererOrg
+        Name: Orderer
+        ID: OrdererMSP
+        MSPDir: crypto-config/ordererOrganizations/acornpub.com/msp
+        Policies:
+            Readers:
+                Type: Signature
+                Rule: "OR('OrdererMSP.member')"
+            Writers:
+                Type: Signature
+                Rule: "OR('OrdererMSP.member')"
+            Admins:
+                Type: Signature
+                Rule: "OR('OrdererMSP.admin')"
+
+    - &Sales1Org
+        Name: Sales1
+        ID: Sales1MSP
+        MSPDir: crypto-config/peerOrganizations/sales1.acornpub.com/msp
+        Policies:
+            Readers:
+                Type: Signature
+                Rule: "OR('Sales1MSP.admin', 'Sales1MSP.member')"
+            Writers:
+                Type: Signature
+                Rule: "OR('Sales1MSP.admin', 'Sales1MSP.member')"
+            Admins:
+                Type: Signature
+                Rule: "OR('Sales1MSP.admin')"
+        AnchorPeers:
+            - Host: peer0.sales1.acornpub.com
+              Port: 7051
+
+    - &CustomerOrg
+        Name: Customer
+        ID: CustomerMSP
+        MSPDir: crypto-config/peerOrganizations/customer.acornpub.com/msp
+        Policies:
+            Readers:
+                Type: Signature
+                Rule: "OR('CustomerMSP.admin', 'CustomerMSP.member')"
+            Writers:
+                Type: Signature
+                Rule: "OR('CustomerMSP.admin', 'CustomerMSP.member')"
+            Admins:
+                Type: Signature
+                Rule: "OR('CustomerMSP.admin')"
+        AnchorPeers:
+            - Host: peer0.customer.acornpub.com
+              Port: 9051
+
+Capabilities:
+    Channel: &ChannelCapabilities
+        V1_4_3: true
+        V1_3: false
+        V1_1: false
+
+    Orderer: &OrdererCapabilities
+        V1_4_2: true
+        V1_1: false
+
+    Application: &ApplicationCapabilities
+        V1_4_2: true
+        V1_3: false
+        V1_2: false
+        V1_1: false
+
+Application: &ApplicationDefaults
+    Organizations:
+    Policies:
+        Readers:
+            Type: ImplicitMeta
+            Rule: "ANY Readers"
+        Writers:
+            Type: ImplicitMeta
+            Rule: "ANY Writers"
+        Admins:
+            Type: ImplicitMeta
+            Rule: "MAJORITY Admins"
+    Capabilities:
+        <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+    OrdererType: solo
+    Addresses:
+        - orderer.acornpub.com:7050
+    BatchTimeout: 2s
+    BatchSize:
+        MaxMessageCount: 10
+        AbsoluteMaxBytes: 99 MB
+        PreferredMaxBytes: 512 KB
+    Kafka:
+        Brokers:
+            - 127.0.0.1:9092
+    EtcdRaft:
+        Consenters:
+            - Host: orderer.acornpub.com
+              Port: 7050
+              ClientTLSCert: crypto-config/ordererOrganizations/acornpub.com/orderers/orderer.acornpub.com/tls/server.crt
+              ServerTLSCert: crypto-config/ordererOrganizations/acornpub.com/orderers/orderer.acornpub.com/tls/server.crt
+    Organizations:
+    Policies:
+        Readers:
+            Type: ImplicitMeta
+            Rule: "ANY Readers"
+        Writers:
+            Type: ImplicitMeta
+            Rule: "ANY Writers"
+        Admins:
+            Type: ImplicitMeta
+            Rule: "MAJORITY Admins"
+        BlockValidation:
+            Type: ImplicitMeta
+            Rule: "ANY Writers"
+
+Channel: &ChannelDefaults
+    Policies:
+        Readers:
+            Type: ImplicitMeta
+            Rule: "ANY Readers"
+        Writers:
+            Type: ImplicitMeta
+            Rule: "ANY Writers"
+        Admins:
+            Type: ImplicitMeta
+            Rule: "MAJORITY Admins"
+    Capabilities:
+        <<: *ChannelCapabilities
+
+Profiles:
+    TwoOrgsOrdererGenesis:
+        <<: *ChannelDefaults
+        Orderer:
+            <<: *OrdererDefaults
+            Organizations:
+                - *OrdererOrg
+            Capabilities:
+                <<: *OrdererCapabilities
+        Consortiums:
+            SampleConsortium:
+                Organizations:
+                    - *Sales1Org
+                    - *CustomerOrg
+    TwoOrgsChannel:
+        Consortium: SampleConsortium
+        <<: *ChannelDefaults
+        Application:
+            <<: *ApplicationDefaults
+            Organizations:
+                - *Sales1Org
+                - *CustomerOrg
+            Capabilities:
+                <<: *ApplicationCapabilities
+
+    SampleDevModeKafka:
+        <<: *ChannelDefaults
+        Capabilities:
+            <<: *ChannelCapabilities
+        Orderer:
+            <<: *OrdererDefaults
+            OrdererType: kafka
+            Kafka:
+                Brokers:
+                - kafka.example.com:9092
+
+            Organizations:
+            - *OrdererOrg
+            Capabilities:
+                <<: *OrdererCapabilities
+        Application:
+            <<: *ApplicationDefaults
+            Organizations:
+            - <<: *OrdererOrg
+        Consortiums:
+            SampleConsortium:
+                Organizations:
+                - *Sales1Org
+                - *CustomerOrg
+
+    SampleMultiNodeEtcdRaft:
+        <<: *ChannelDefaults
+        Capabilities:
+            <<: *ChannelCapabilities
+        Orderer:
+            <<: *OrdererDefaults
+            OrdererType: etcdraft
+            EtcdRaft:
+                Consenters:
+                - Host: orderer.acornpub.com
+                  Port: 7050
+                  ClientTLSCert: crypto-config/ordererOrganizations/acornpub.com/orderers/orderer.acornpub.com/tls/server.crt
+                  ServerTLSCert: crypto-config/ordererOrganizations/acornpub.com/orderers/orderer.acornpub.com/tls/server.crt
+            Addresses:
+                - orderer.acornpub.com:7050
+
+            Organizations:
+            - *OrdererOrg
+            Capabilities:
+                <<: *OrdererCapabilities
+        Application:
+            <<: *ApplicationDefaults
+            Organizations:
+            - <<: *OrdererOrg
+        Consortiums:
+            SampleConsortium:
+                Organizations:
+                - *Sales1Org
+                - *CustomerOrg
