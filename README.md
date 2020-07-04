@@ -2,7 +2,7 @@
 hyperledger reference repository
 
 This repository is example of hyperledger network
-For reference only
+\nFor reference only
 
 If you want using this example, must change in this setting to your enviorment setting
 
