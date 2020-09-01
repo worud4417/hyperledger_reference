@@ -15,3 +15,6 @@ Example's running enviorment is
 
 **Hyperledger version 1.4.3**  
 Orderer type "SOLO"
+
+**Hyperledger fabric Guide**
+reference of hyperledger fabric v2.x
